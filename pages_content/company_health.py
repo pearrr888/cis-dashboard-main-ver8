@@ -99,22 +99,19 @@ def render(ctx):
         )
         show_chart(fig_health_trend, key="health_trend", expand_height=650)
 
-    st.markdown("<div style='margin-top:22px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:22px;'></div>", unsafe_allow_html=True)
     st.markdown("""<div style="font-size:15px; font-weight:bold; color:#F8FAFC; letter-spacing:0.5px; margin-bottom:8px;">
-    7 DIMENSIONS OVERVIEW <span style="font-size:14.5px; color:#94A3B8; font-weight:normal; margin-left:6px;">ผลการประเมินสุขภาพทางการเงินในแต่ละมิติ (คำนวณจากอัตราส่วนจริง)</span></div>""", unsafe_allow_html=True)
+HEALTH SCORE COMPONENTS <span style="font-size:14.5px; color:#94A3B8; font-weight:normal; margin-left:6px;">องค์ประกอบจริงของ Health Score (ROE 30% + ROA 25% + Liquidity 20% + Debt/Stability 25%)</span></div>""", unsafe_allow_html=True)
 
-    latest_fin_row = ctx.fin_stock.iloc[-1] if not ctx.fin_stock.empty else pd.Series(dtype=float)
-    ocf_ni = safe(latest_fin_row.get('ocf_to_ni'), 1.0)
-    int_cov = safe(latest_fin_row.get('interest_coverage'), 5.0)
-    rev_growth = safe(ctx.stock_info.get('revenue_growth_yoy'), 0.0)
+    roe_raw = safe(ctx.stock_info.get('roe'), 10.0)
+    roa_raw = safe(ctx.stock_info.get('roa'), 5.0)
+    cr_raw = safe(ctx.stock_info.get('current_ratio'), 1.2)
+    de_raw = safe(ctx.stock_info.get('de_ratio'), 1.0)
 
-    dim_profit = int(round(safe(ctx.stock_info.get('s_profitability'), 50)))
-    dim_growth = int(round(np.clip(50 + rev_growth * 2, 0, 100)))
-    dim_stability = int(round(safe(ctx.stock_info.get('s_debt'), 50)))
-    dim_liquidity = int(round(safe(ctx.stock_info.get('s_liquidity'), 50)))
-    dim_cashflow = int(round(np.clip(50 + ocf_ni * 5, 0, 100)))
-    dim_efficiency = int(round(np.clip(safe(ctx.stock_info.get('roa'), 5) * 7, 0, 100)))
-    dim_earnings = int(round(np.clip(50 + int_cov * 0.3, 0, 100)))
+    s_roe = float(np.clip(roe_raw * 3.5, 0, 100))
+    s_roa = float(np.clip(roa_raw * 7.0, 0, 100))
+    s_liq = float(np.clip(cr_raw * 45.0, 0, 100))
+    s_debt = float(np.clip((2.5 - de_raw) * 40.0, 0, 100))
 
     def label_for(score):
         if score >= 75: return "EXCELLENT"
@@ -122,25 +119,32 @@ def render(ctx):
         if score >= 35: return "MODERATE"
         return "WEAK"
 
-    dims = [
-        ("1", "📊", "PROFITABILITY", "30%", dim_profit, "#10B981"),
-        ("2", "📈", "GROWTH", "15%", dim_growth, "#3B82F6"),
-        ("3", "🛡️", "FIN. STABILITY", "20%", dim_stability, "#EAB308"),
-        ("4", "💧", "LIQUIDITY", "10%", dim_liquidity, "#06B6D4"),
-        ("5", "💵", "CASH FLOW", "10%", dim_cashflow, "#8B5CF6"),
-        ("6", "⚙️", "EFFICIENCY", "10%", dim_efficiency, "#F97316"),
-        ("7", "🎖️", "EARNINGS Q.", "5%", dim_earnings, "#10B981"),
+    components = [
+        ("ROE", "📊", "30%", 0.30, s_roe, "#10B981", f"ROE {roe_raw:.1f}%"),
+        ("ROA", "📈", "25%", 0.25, s_roa, "#3B82F6", f"ROA {roa_raw:.1f}%"),
+        ("LIQUIDITY", "💧", "20%", 0.20, s_liq, "#06B6D4", f"Current Ratio {cr_raw:.2f}x"),
+        ("DEBT / STABILITY", "🛡️", "25%", 0.25, s_debt, "#EAB308", f"D/E {de_raw:.2f}x"),
     ]
-    dim_html = "".join([f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:10px; padding:10px 8px; text-align:center;">
-    <div style="display:flex; align-items:center; justify-content:center; gap:4px;"><span style="font-size:14.5px;">{icon}</span><span style="font-size:13px; font-weight:bold; color:#CBD5E1;">{n}. {label}</span></div>
-    <div style="font-size:12.5px; color:#64748B; margin-top:1px;">Weight {w}</div>
-    <div style="margin:8px auto; width:60px; height:60px; border-radius:50%; background:conic-gradient({color} 0% {score}%, #1E293B {score}% 100%); display:flex; align-items:center; justify-content:center;">
-    <div style="width:48px; height:48px; border-radius:50%; background-color:#0F172A; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-    <span style="font-size:16px; font-weight:bold; color:#FFFFFF; line-height:1;">{score}</span><span style="font-size:11.5px; color:#64748B;">/100</span></div></div>
-    <div style="color:{color}; font-size:13.5px; font-weight:bold;">{label_for(score)}</div>
-    </div>""" for n, icon, label, w, score, color in dims])
-    st.markdown(f"""<div style="display:grid; grid-template-columns: repeat(7, 1fr); gap:8px;">{dim_html}</div>""", unsafe_allow_html=True)
 
+    comp_html = "".join([f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:10px; padding:10px 8px; text-align:center;">
+<div style="display:flex; align-items:center; justify-content:center; gap:4px;"><span style="font-size:14.5px;">{icon}</span><span style="font-size:13px; font-weight:bold; color:#CBD5E1;">{label}</span></div>
+<div style="font-size:12.5px; color:#64748B; margin-top:1px;">Weight {w} &bull; {sub}</div>
+<div style="margin:8px auto; width:60px; height:60px; border-radius:50%; background:conic-gradient({color} 0% {score:.0f}%, #1E293B {score:.0f}% 100%); display:flex; align-items:center; justify-content:center;">
+<div style="width:48px; height:48px; border-radius:50%; background-color:#0F172A; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+<span style="font-size:16px; font-weight:bold; color:#FFFFFF; line-height:1;">{score:.0f}</span><span style="font-size:11.5px; color:#64748B;">/100</span></div></div>
+<div style="color:{color}; font-size:13.5px; font-weight:bold;">{label_for(score)}</div>
+<div style="font-size:11px; color:#64748B; margin-top:2px;">contributes {score*weight:.1f} pts</div>
+</div>""" for label, icon, w, weight, score, color, sub in components])
+    st.markdown(f"""<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">{comp_html}</div>""", unsafe_allow_html=True)
+
+    computed_total = round(sum(score * weight for _, _, _, weight, score, _, _ in components), 1)
+    st.markdown(f"""<div style="font-size:12.5px; color:#64748B; margin-top:8px; text-align:right;">
+รวมคะแนนถ่วงน้ำหนักตามสูตร = {computed_total:.1f} &rarr; Health Score ที่แสดง (หลังปรับช่วง 25-98) = {h_score}/100</div>""", unsafe_allow_html=True)
+
+    missing_fields = ctx.stock_info.get('health_missing_fields')
+    if missing_fields:
+        st.markdown(f"""<div style="background:rgba(245,158,11,0.1); border:1px solid #F59E0B; border-radius:8px; padding:8px 12px; margin-top:8px; font-size:12.5px; color:#F59E0B;">
+⚠️ ข้อมูลบางส่วนของปีล่าสุดหายไปจากไฟล์งบการเงิน ({missing_fields}) ระบบใช้ค่า default แทนในการคำนวณ Health Score ของ {ctx.selected_ticker} ตัวเลขนี้จึงอาจไม่สะท้อนสถานะจริงทั้งหมด</div>""", unsafe_allow_html=True)
     st.markdown("<div style='margin-top:22px;'></div>", unsafe_allow_html=True)
     r3_c1, r3_c2, r3_c3 = st.columns([1.5, 1.25, 1.25])
 
