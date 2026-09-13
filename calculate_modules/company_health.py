@@ -33,13 +33,26 @@ from calculate_modules.common import clean_float
 
 
 def calculate_health_module(df_fin_ticker):
-    """Module 1: Company Health (ใช้งบปีล่าสุดที่มีจริง)"""
+    """Module 1: Company Health (ใช้งบปีล่าสุดที่มีจริง)
+    หมายเหตุ: ถ้าค่า ROE/ROA/D-E/Current Ratio ของปีล่าสุดหายไปจากไฟล์ จะเติมค่า default
+    ให้ระบบยังทำงานต่อได้ แต่จะบันทึกไว้ใน health_missing_fields เพื่อไม่ให้ผู้ใช้เข้าใจผิด
+    ว่าตัวเลขนี้เป็นข้อมูลจริงจากงบการเงิน"""
     row_latest = df_fin_ticker.sort_values(by='year').iloc[[-1]]
     r = row_latest.iloc[0]
-    roe = clean_float(r.get('roe'), default=10.0)
-    roa = clean_float(r.get('roa'), default=5.0)
-    de = clean_float(r.get('de_ratio'), default=1.0)
-    curr_ratio = clean_float(r.get('current_ratio'), default=1.2)
+
+    missing_fields = []
+
+    def get_ratio_or_flag(col, default, label):
+        raw = r.get(col)
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            missing_fields.append(label)
+            return default
+        return clean_float(raw, default)
+
+    roe = get_ratio_or_flag('roe', 10.0, 'ROE')
+    roa = get_ratio_or_flag('roa', 5.0, 'ROA')
+    de = get_ratio_or_flag('de_ratio', 1.0, 'D/E')
+    curr_ratio = get_ratio_or_flag('current_ratio', 1.2, 'Current Ratio')
 
     s_roe = np.clip(roe * 3.5, 0, 100)
     s_roa = np.clip(roa * 7.0, 0, 100)
@@ -58,8 +71,9 @@ def calculate_health_module(df_fin_ticker):
         's_profitability': round(float((s_roe * 0.6) + (s_roa * 0.4)), 1),
         's_liquidity': round(float(s_liq), 1),
         's_debt': round(float(s_debt), 1),
+        'health_data_complete': len(missing_fields) == 0,
+        'health_missing_fields': ', '.join(missing_fields) if missing_fields else '',
     }
-
 
 def build_health_score_yearly(df_fin_ticker):
     """คำนวณคะแนน Health รายปี (2023-2025) จากงบการเงินจริงแต่ละปี เพื่อวาดกราฟ trend
