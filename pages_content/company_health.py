@@ -134,7 +134,8 @@ def render(ctx):
 <tr style="border-bottom:1px solid #1E293B; color:#64748B; font-size:12.5px;"><th style="padding:3px 0;">Metric</th><th>{ctx.selected_ticker}</th><th>{competitor}</th><th>vs {competitor}</th></tr>
 {rows_html}
 </table></div>""", unsafe_allow_html=True)
-
+# กำหนดค่าใหม่ในสโคปนี้เอง กันปัญหากรณีตัวแปร h_score จากด้านบนหายไประหว่างแก้ไข
+    h_score = int(round(safe(ctx.stock_info.get('health_score'), 75)))
     roe_raw = safe(ctx.stock_info.get('roe'), 10.0)
     roa_raw = safe(ctx.stock_info.get('roa'), 5.0)
     cr_raw = safe(ctx.stock_info.get('current_ratio'), 1.2)
