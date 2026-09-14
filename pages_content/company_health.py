@@ -78,30 +78,62 @@ def render(ctx):
     Financial Health Benchmark: {ctx.stock_info.get('sector','-')}</span></div>
     </div>""", unsafe_allow_html=True)
 
-    with r1_c3:
-        st.markdown("""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px 12px 0 0; padding:12px 16px 0 16px;">
-    <div style="font-size:14.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">COMPANY HEALTH SCORE TREND (Actual, 2023-2025)</div></div>""", unsafe_allow_html=True)
+    with r3_c3:
+        # เลือกบริษัทคู่แข่งจาก sector เดียวกัน (ไม่รวมตัวเอง) แทนการใช้ค่าเฉลี่ยกลุ่ม
+        peer_options = [t for t in ctx.sector_peers['ticker'].tolist() if t != ctx.selected_ticker]
 
-        hy = ctx.health_yearly_df[ctx.health_yearly_df['ticker'] == ctx.selected_ticker].sort_values('year') if not ctx.health_yearly_df.empty else pd.DataFrame()
-        trend_x = hy['year'].astype(str).tolist() if not hy.empty else ['2023', '2024', '2025']
-        trend_y = hy['health_score'].tolist() if not hy.empty else [h_score, h_score, h_score]
+        if not peer_options:
+            st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:14px; height:360px; display:flex; align-items:center; justify-content:center; text-align:center;">
+<div style="font-size:13.5px; color:#94A3B8;">ไม่พบบริษัทคู่แข่งในกลุ่ม {ctx.stock_info.get('sector','-')} สำหรับเปรียบเทียบ<br>(มีเพียง {ctx.selected_ticker} ที่ติดตามอยู่ในกลุ่มนี้)</div>
+</div>""", unsafe_allow_html=True)
+        else:
+            competitor = st.selectbox(
+                "เทียบกับคู่แข่ง", peer_options,
+                key="health_competitor_select",
+                format_func=lambda t: f"{t} — {COMPANY_NAMES.get(t, t)}"
+            )
 
-        fig_health_trend = go.Figure()
-        fig_health_trend.add_trace(go.Scatter(
-            x=trend_x, y=trend_y, mode='lines+markers+text', text=trend_y, textposition='top center',
-            textfont=dict(size=12.5, color='#F8FAFC'), line=dict(color='#10B981', width=2),
-            marker=dict(size=10, color='#10B981', line=dict(width=1.5, color='#FFFFFF'))
-        ))
-        fig_health_trend.update_layout(
-            height=168, margin=dict(l=25, r=15, t=10, b=20), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
-            yaxis=dict(range=[0, 110], tickvals=[0, 25, 50, 75, 100], tickfont=dict(size=11.5, color="#64748B"), gridcolor="#1E293B", zeroline=False),
-            xaxis=dict(tickfont=dict(size=12, color="#94A3B8"), gridcolor="#1E293B"), showlegend=False
-        )
-        show_chart(fig_health_trend, key="health_trend", expand_height=650)
+            comp_fin_all = ctx.fin_df[ctx.fin_df['ticker'] == competitor].sort_values('year')
+            latest_year = ctx.fin_stock['year'].max()
+            comp_fin_row = comp_fin_all[comp_fin_all['year'] == latest_year]
+            if comp_fin_row.empty and not comp_fin_all.empty:
+                comp_fin_row = comp_fin_all.iloc[[-1]]  # fallback ปีล่าสุดที่คู่แข่งมีข้อมูลจริง
 
-        st.markdown("<div style='margin-top:22px;'></div>", unsafe_allow_html=True)
-    st.markdown("""<div style="font-size:15px; font-weight:bold; color:#F8FAFC; letter-spacing:0.5px; margin-bottom:8px;">
-HEALTH SCORE COMPONENTS <span style="font-size:14.5px; color:#94A3B8; font-weight:normal; margin-left:6px;">องค์ประกอบจริงของ Health Score (ROE 30% + ROA 25% + Liquidity 20% + Debt/Stability 25%)</span></div>""", unsafe_allow_html=True)
+            def comp_val(col, default=0.0):
+                return safe(comp_fin_row.iloc[0].get(col), default) if not comp_fin_row.empty else default
+
+            comp_roe = comp_val('roe')
+            comp_roa = comp_val('roa')
+            comp_npm = comp_val('net_margin')
+            comp_de = comp_val('de_ratio')
+            comp_cr = comp_val('current_ratio')
+            comp_year_used = int(comp_fin_row.iloc[0]['year']) if not comp_fin_row.empty else None
+
+            def pct_bar(stock_val, comp_v, higher_better=True):
+                if comp_v == 0: return 50
+                ratio = (stock_val / comp_v) if higher_better else (comp_v / max(stock_val, 0.01))
+                return int(np.clip(ratio * 50, 5, 100))
+
+            rows_cmp = [
+                ("ROE (%)", roe_25, f"{comp_roe:.1f}", pct_bar(safe(roe_25 if roe_25 != '-' else 0), comp_roe)),
+                ("ROA (%)", roa_25, f"{comp_roa:.1f}", pct_bar(safe(roa_25 if roa_25 != '-' else 0), comp_roa)),
+                ("Net Margin (%)", npm_25, f"{comp_npm:.1f}", pct_bar(safe(npm_25 if npm_25 != '-' else 0), comp_npm)),
+                ("Debt to Equity (x)", de_25, f"{comp_de:.2f}", pct_bar(safe(de_25 if de_25 != '-' else 0), comp_de, higher_better=False)),
+                ("Current Ratio (x)", cr_25, f"{comp_cr:.2f}", pct_bar(safe(cr_25 if cr_25 != '-' else 0), comp_cr)),
+            ]
+            rows_html = "".join([f"""<tr style="border-bottom:1px solid #1E293B;">
+<td style="padding:4px 0;">{name}</td><td style="font-weight:bold; color:#F8FAFC;">{v}</td><td style="color:#64748B;">{cv}</td>
+<td><div style="display:flex; align-items:center; gap:6px;"><div style="background:#1E293B; width:60px; height:9px; border-radius:4px; overflow:hidden;"><div style="background:#10B981; width:{pct}%; height:100%;"></div></div><span style="font-size:12px; color:#10B981; font-weight:bold;">{pct}%</span></div></td>
+</tr>""" for name, v, cv, pct in rows_cmp])
+
+            year_note = f" (ปี {comp_year_used})" if comp_year_used and comp_year_used != latest_year else ""
+            st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:14px; height:360px;">
+<div style="font-size:14.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">HEAD-TO-HEAD COMPARISON</div>
+<div style="font-size:12.5px; color:#64748B; margin-bottom:8px;">เทียบกับคู่แข่งจริง{year_note} &bull; {ctx.stock_info.get('sector','-')}</div>
+<table style="width:100%; text-align:left; font-size:13.5px; color:#CBD5E1; border-collapse:collapse;">
+<tr style="border-bottom:1px solid #1E293B; color:#64748B; font-size:12.5px;"><th style="padding:3px 0;">Metric</th><th>{ctx.selected_ticker}</th><th>{competitor}</th><th>vs {competitor}</th></tr>
+{rows_html}
+</table></div>""", unsafe_allow_html=True)
 
     roe_raw = safe(ctx.stock_info.get('roe'), 10.0)
     roa_raw = safe(ctx.stock_info.get('roa'), 5.0)
