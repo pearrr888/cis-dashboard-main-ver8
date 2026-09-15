@@ -48,7 +48,9 @@ def render(ctx):
 <div><div style="display:flex; align-items:center; gap:8px;"><h2 style="margin:0; font-size:23px; font-weight:bold; color:#F8FAFC; letter-spacing:0.5px;">COMPANY HEALTH</h2></div>
 <div style="font-size:15px; color:#94A3B8; margin-top:2px;">ประเมินสุขภาพทางการเงินของบริษัทจากมิติสำคัญตามงบการเงินจริง</div></div>
 <div style="text-align:right;"><span style="font-size:13px; color:#64748B;">ข้อมูล ณ วันที่</span><br><b style="color:#CBD5E1; font-size:15px;">{ctx.stock_info.get('latest_date','-')}</b></div>
-</div>""", unsafe_allow_html=True)
+</div>""",
+unsafe_allow_html=True
+)
 
     r1_c1, r1_c2, r1_c3 = st.columns([1.1, 1.4, 1.5])
 
