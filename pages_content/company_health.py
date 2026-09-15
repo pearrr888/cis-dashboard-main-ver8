@@ -171,8 +171,29 @@ Financial Health Benchmark: {ctx.stock_info.get('sector','-')}</span></div>
 <div style="font-size:13px; color:#CBD5E1; line-height:1.45;">
 {''.join([f'<div style="display:flex; gap:6px; margin-bottom:3px;"><span style="color:#F59E0B;">⚠️</span><span>{w}</span></div>' for w in watch])}
 </div></div>""", unsafe_allow_html=True)
+    
+    with r1_c3:
+        st.markdown("""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px 12px 0 0; padding:12px 16px 0 16px;">
+<div style="font-size:14.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">COMPANY HEALTH SCORE TREND (Actual, 2023-2025)</div></div>""", unsafe_allow_html=True)
 
-    with r3_c3:
+        hy = ctx.health_yearly_df[ctx.health_yearly_df['ticker'] == ctx.selected_ticker].sort_values('year') if not ctx.health_yearly_df.empty else pd.DataFrame()
+        trend_x = hy['year'].astype(str).tolist() if not hy.empty else ['2023', '2024', '2025']
+        trend_y = hy['health_score'].tolist() if not hy.empty else [h_score, h_score, h_score]
+
+        fig_health_trend = go.Figure()
+        fig_health_trend.add_trace(go.Scatter(
+            x=trend_x, y=trend_y, mode='lines+markers+text', text=trend_y, textposition='top center',
+            textfont=dict(size=12.5, color='#F8FAFC'), line=dict(color='#10B981', width=2),
+            marker=dict(size=10, color='#10B981', line=dict(width=1.5, color='#FFFFFF'))
+        ))
+        fig_health_trend.update_layout(
+            height=168, margin=dict(l=25, r=15, t=10, b=20), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
+            yaxis=dict(range=[0, 110], tickvals=[0, 25, 50, 75, 100], tickfont=dict(size=11.5, color="#64748B"), gridcolor="#1E293B", zeroline=False),
+            xaxis=dict(type='category', tickfont=dict(size=12, color="#94A3B8"), gridcolor="#1E293B"), showlegend=False
+        )
+        show_chart(fig_health_trend, key="health_trend", expand_height=650)
+
+    with r3_c4:
         # เลือกบริษัทคู่แข่งจาก sector เดียวกัน (ไม่รวมตัวเอง) แทนการใช้ค่าเฉลี่ยกลุ่ม
         peer_options = [t for t in ctx.sector_peers['ticker'].tolist() if t != ctx.selected_ticker]
 
