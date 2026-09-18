@@ -1,8 +1,8 @@
-”””
+"""
 pages_content/company_health.py
 ---------------------------
 หน้า "Company Health" ของ CIS Dashboard
-”””
+
 วิธีทดสอบหน้านี้แบบเดี่ยว (ไม่ต้องรอทีมคนอื่น):
     streamlit run preview_my_page.py
     (แล้วเลือกโมดูลนี้จาก dropdown ในไฟล์ preview_my_page.py)
