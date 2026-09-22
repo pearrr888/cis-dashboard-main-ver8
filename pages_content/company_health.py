@@ -132,8 +132,11 @@ def render(ctx):
     # [ISSUE 01] แสดงเฉพาะ 4 องค์ประกอบ + น้ำหนักที่ใช้คำนวณ health_score จริง
     # (น้ำหนักอ่านจาก HEALTH_WEIGHTS ใน calculate_modules/company_health.py ไม่เขียนตัวเลขซ้ำในไฟล์นี้)
     # ------------------------------------------------------------------
-    st.markdown("""<div style="font-size:15px; font-weight:bold; color:#F8FAFC; letter-spacing:0.5px; margin-bottom:8px;">
-    SCORE COMPONENTS <span style="font-size:14.5px; color:#94A3B8; font-weight:normal; margin-left:6px;">องค์ประกอบและน้ำหนักที่ใช้คำนวณคะแนนรวมจริง (คำนวณจากอัตราส่วนจริง)</span></div>""", unsafe_allow_html=True)
+    # [ISSUE 03] เพดาน D/E ที่ใช้จริงกับหุ้นตัวนี้ (คำนวณตาม sector มาจากฝั่งคำนวณแล้ว -- ที่นี่แค่แสดงผลให้โปร่งใส)
+    _de_thr = num_or_none(ctx.stock_info.get('de_threshold_used'))
+    _de_thr_txt = f" · D/E Cap ({ctx.stock_info.get('sector','-')}): {_de_thr:.1f}x" if _de_thr is not None else ""
+    st.markdown(f"""<div style="font-size:15px; font-weight:bold; color:#F8FAFC; letter-spacing:0.5px; margin-bottom:8px;">
+    SCORE COMPONENTS <span style="font-size:14.5px; color:#94A3B8; font-weight:normal; margin-left:6px;">องค์ประกอบและน้ำหนักที่ใช้คำนวณคะแนนรวมจริง (คำนวณจากอัตราส่วนจริง){_de_thr_txt}</span></div>""", unsafe_allow_html=True)
 
     # ใช้ในส่วน WATCH OUT ด้านล่าง (ไม่เกี่ยวกับคะแนนรวม)
     rev_growth = safe(ctx.stock_info.get('revenue_growth_yoy'), 0.0)
