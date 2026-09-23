@@ -84,8 +84,18 @@ def render(ctx):
     <div style="font-size:14.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">COMPANY HEALTH SCORE TREND (Actual, 2023-2025)</div></div>""", unsafe_allow_html=True)
 
         hy = ctx.health_yearly_df[ctx.health_yearly_df['ticker'] == ctx.selected_ticker].sort_values('year') if not ctx.health_yearly_df.empty else pd.DataFrame()
-        trend_x = hy['year'].astype(str).tolist() if not hy.empty else ['2023', '2024', '2025']
-        trend_y = hy['health_score'].tolist() if not hy.empty else [h_score, h_score, h_score]
+        
+        # บังคับแกน X ให้เป็น 2023, 2024, 2025 เสมอ (ปิดทับข้อมูลขยะจากฐานข้อมูล)
+        trend_x = ['2023', '2024', '2025']
+        
+        # ดึงคะแนน 3 ปีล่าสุดมาเรียงให้ตรงกับแกน X
+        raw_y = hy['health_score'].tolist() if not hy.empty else [h_score, h_score, h_score]
+        if len(raw_y) >= 3:
+            trend_y = raw_y[-3:]
+        elif len(raw_y) > 0:
+            trend_y = [raw_y[0]] * (3 - len(raw_y)) + raw_y
+        else:
+            trend_y = [h_score, h_score, h_score]
 
         fig_health_trend = go.Figure()
         fig_health_trend.add_trace(go.Scatter(
@@ -94,7 +104,6 @@ def render(ctx):
             marker=dict(size=10, color='#10B981', line=dict(width=1.5, color='#FFFFFF'))
         ))
         
-        # แก้ไขตรงนี้: เพิ่ม type='category' เข้าไปใน xaxis เพื่อป้องกันกราฟใส่จุดทศนิยมบนแกนปี
         fig_health_trend.update_layout(
             height=168, margin=dict(l=25, r=15, t=10, b=20), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
             yaxis=dict(range=[0, 110], tickvals=[0, 25, 50, 75, 100], tickfont=dict(size=11.5, color="#64748B"), gridcolor="#1E293B", zeroline=False),
