@@ -1,119 +1,176 @@
 """
-company_health Cal.py (หรือ calculate_modules/company_health.py)
---------------------------------------------------------------
+calculate_scores.py — Orchestrator (Data Pipeline / Integration Lead ดูแลไฟล์นี้)
+------------------------------------------------------------------------------------
+ไฟล์นี้ "ไม่มีสูตรคำนวณของโมดูลไหนอยู่ในนี้แล้ว" — ทำหน้าที่แค่:
+    1. โหลดข้อมูลจากฐานข้อมูล
+    2. วนลูปแต่ละหุ้น เรียกฟังก์ชันคำนวณของทั้ง 6 โมดูลจาก calculate_modules/
+    3. รวมผลลัพธ์ + บันทึกกลับลงฐานข้อมูล
+
+สูตร/ตรรกะการคำนวณจริงของแต่ละโมดูลอยู่ที่:
+    calculate_modules/company_health.py       (เจ้าของ: คนที่ดูแล pages_content/company_health.py)
+    calculate_modules/fair_value.py           (เจ้าของ: คนที่ดูแล pages_content/fair_value.py)
+    calculate_modules/entry_timing.py         (เจ้าของ: คนที่ดูแล pages_content/entry_timing.py)
+    calculate_modules/ai_prediction.py        (เจ้าของ: คนที่ดูแล pages_content/ai_prediction.py)
+    calculate_modules/risk_analysis.py        (เจ้าของ: คนที่ดูแล pages_content/risk_analysis.py)
+    calculate_modules/industry_benchmark.py   (เจ้าของ: คนที่ดูแล pages_content/industry_benchmark.py)
+
+⚠️ ไฟล์นี้เป็น "ของกลาง" เหมือน common.py ของฝั่ง UI — โดยปกติ เจ้าของแต่ละโมดูลไม่ต้องแก้ไฟล์นี้เลย
+แก้แค่ calculate_modules/<โมดูลของตัวเอง>.py พอ ถ้าจำเป็นต้องแก้ไฟล์นี้ (เช่น เพิ่มตารางผลลัพธ์ใหม่)
+ให้แจ้ง Data Pipeline / Integration Lead ก่อน
+
+ตารางผลลัพธ์ที่สร้าง:
+- cis_summary_scores      : สรุปคะแนนรายหุ้น (ใช้ในทุกหน้าของ Dashboard)
+- ai_feature_importance   : Feature importance ของโมเดล Random Forest รายหุ้น (ใช้ในหน้า AI Prediction)
+- ai_backtest_history     : ผลทำนายจริงบนชุด Test ปี 2025 (ใช้ในหน้า AI Prediction)
+- risk_rolling_history    : Rolling volatility / drawdown รายสัปดาห์ (ใช้วาดกราฟหน้า Risk Analysis)
+- health_score_yearly     : คะแนนสุขภาพการเงินรายปี 2023-2025 (ใช้วาดกราฟ trend หน้า Company Health)
+- fair_value_yearly       : Fair Value ย้อนหลังรายปี เทียบราคาจริง (ใช้วาดกราฟหน้า Fair Value)
 """
-import numpy as np
+
 import pandas as pd
+from sqlalchemy import create_engine
+from datetime import datetime
 
-def clean_float_or_na(val):
-    """
-    Issue 02: ตรวจจับข้อมูลว่างเปล่า (NaN/None) หากไม่มีข้อมูลให้คืนค่า np.nan 
-    เพื่อป้องกัน Error คณิตศาสตร์ และใช้เป็นสัญลักษณ์ว่าข้อมูลแหว่ง (ห้ามใช้ค่า Default)
-    """
-    if pd.isna(val) or val is None:
-        return np.nan
-    if isinstance(val, (int, float)):
-        return float(val)
+from calculate_modules.common import clean_float, SECTOR_MAP
+from calculate_modules import company_health, fair_value, entry_timing, ai_prediction, risk_analysis, industry_benchmark
+
+DB_NAME = 'cis_database.db'
+TARGET_STOCKS = ['ADVANC', 'CCET', 'DELTA', 'HANA', 'JMART', 'KCE', 'THCOM', 'TRUE']
+
+
+def load_data_from_db(engine):
+    df_fin = pd.read_sql("SELECT * FROM stock_financials", con=engine)
+    df_price = pd.read_sql("SELECT * FROM stock_daily_prices", con=engine)
+    df_price['date'] = pd.to_datetime(df_price['date'])
     try:
-        cleaned = str(val).replace(',', '').replace('%', '').strip()
-        if cleaned in ['', '-', 'nan', 'None']:
-            return np.nan
-        return float(cleaned)
+        df_risk = pd.read_sql("SELECT * FROM stock_risk_static", con=engine)
     except Exception:
-        return np.nan
+        df_risk = pd.DataFrame(columns=['ticker', 'beta', 'volatility_pct', 'max_drawdown_pct'])
+    return df_fin, df_price, df_risk
 
-def calculate_health_module(df_fin_ticker, sector=None):
-    """Module 1: Company Health (คำนวณจากงบปีล่าสุด)"""
-    row_latest = df_fin_ticker.sort_values(by='year').iloc[[-1]]
-    r = row_latest.iloc[0]
 
-    # Issue 04: ดึงค่าโดยตรงจากชื่อคอลัมน์มาตรฐาน
-    roe_val = clean_float_or_na(r.get('roe'))
-    roa_val = clean_float_or_na(r.get('roa'))
-    de_val = clean_float_or_na(r.get('de_ratio'))
-    cr_val = clean_float_or_na(r.get('current_ratio'))
+def run_full_pipeline():
+    engine = create_engine(f'sqlite:///{DB_NAME}')
+    df_fin_all, df_price_all, df_risk_all = load_data_from_db(engine)
 
-    missing_fields = []
-    
-    # ดักจับว่าตัวแปรใดแหว่งบ้าง
-    if pd.isna(roe_val): missing_fields.append('ROE')
-    if pd.isna(roa_val): missing_fields.append('ROA')
-    if pd.isna(de_val): missing_fields.append('D/E Ratio')
-    if pd.isna(cr_val): missing_fields.append('Current Ratio')
+    print("\n--- เริ่มประมวลผลระบบ CIS Scoring สำหรับหุ้นทั้ง 8 ตัว (ใช้ข้อมูลจริงทั้งหมด) ---")
+    all_summary = []
+    all_feature_importance = []
+    all_backtest = []
+    all_risk_history = []
+    all_health_yearly = []
+    all_fair_value_yearly = []
 
-    # Issue 03: ปรับตรรกะ D/E Ratio (Dynamic Threshold)
-    # หากเป็นกลุ่ม Technology/Telecomm ให้ยอมรับเพดานหนี้ได้สูงขึ้น
-    de_threshold = 2.5
-    if sector and "Technology" in str(sector):
-        de_threshold = 3.5
+    for ticker in TARGET_STOCKS:
+        fin_sub = df_fin_all[df_fin_all['ticker'] == ticker]
+        price_sub = df_price_all[df_price_all['ticker'] == ticker].sort_values(by='date')
+        risk_sub = df_risk_all[df_risk_all['ticker'] == ticker] if not df_risk_all.empty else None
 
-    # Issue 01: น้ำหนัก 4 มิติที่ใช้จริง
-    w_roe, w_roa, w_liq, w_debt = 0.30, 0.25, 0.20, 0.25
-
-    if missing_fields:
-        # หากข้อมูลแหว่ง กำหนดให้คะแนนเป็น np.nan (แทน 0 หรือ Default เพื่อไม่ให้บิดเบือน)
-        health_score = np.nan
-        s_roe = s_roa = s_liq = s_debt = np.nan
-    else:
-        s_roe = np.clip(roe_val * 3.5, 0, 100)
-        s_roa = np.clip(roa_val * 7.0, 0, 100)
-        s_liq = np.clip(cr_val * 45.0, 0, 100)
-        s_debt = np.clip((de_threshold - de_val) * 40.0, 0, 100)
-        
-        raw_score = (s_roe * w_roe) + (s_roa * w_roa) + (s_liq * w_liq) + (s_debt * w_debt)
-        # ขยาย Scale เป็น 0-100 เต็มรูปแบบ
-        health_score = round(float(np.clip(raw_score, 0, 100)), 1)
-
-    return {
-        'health_score': health_score, # เป็น float หรือ np.nan
-        
-        # Issue 02: คืนข้อความ "N/A" สำหรับให้ UI แสดงผลทันที
-        'roe': "N/A" if pd.isna(roe_val) else round(roe_val, 2),
-        'roa': "N/A" if pd.isna(roa_val) else round(roa_val, 2),
-        'de_ratio': "N/A" if pd.isna(de_val) else round(de_val, 2),
-        'current_ratio': "N/A" if pd.isna(cr_val) else round(cr_val, 2),
-        
-        # Issue 01: คืนค่ามิติจริง 4 ตัวพร้อมน้ำหนัก
-        'dim_roe_score': "N/A" if pd.isna(s_roe) else round(float(s_roe), 1),
-        'dim_roe_weight': f"{int(w_roe*100)}%",
-        'dim_roa_score': "N/A" if pd.isna(s_roa) else round(float(s_roa), 1),
-        'dim_roa_weight': f"{int(w_roa*100)}%",
-        'dim_liquidity_score': "N/A" if pd.isna(s_liq) else round(float(s_liq), 1),
-        'dim_liquidity_weight': f"{int(w_liq*100)}%",
-        'dim_debt_score': "N/A" if pd.isna(s_debt) else round(float(s_debt), 1),
-        'dim_debt_weight': f"{int(w_debt*100)}%",
-        
-        'health_data_complete': len(missing_fields) == 0,
-        'health_missing_fields': ', '.join(missing_fields) if missing_fields else ''
-    }
-
-def build_health_score_yearly(df_fin_ticker, sector=None):
-    """สำหรับวาดกราฟ Trend ย้อนหลัง 3 ปี"""
-    rows = []
-    
-    de_threshold = 2.5
-    if sector and "Technology" in str(sector):
-        de_threshold = 3.5
-
-    for _, r in df_fin_ticker.sort_values('year').iterrows():
-        roe = clean_float_or_na(r.get('roe'))
-        roa = clean_float_or_na(r.get('roa'))
-        de = clean_float_or_na(r.get('de_ratio'))
-        cr = clean_float_or_na(r.get('current_ratio'))
-        
-        # หากปีไหนข้อมูลแหว่ง ให้ข้ามไป ไม่ใช้ค่า Default มาหลอกวาดกราฟ
-        if pd.isna(roe) or pd.isna(roa) or pd.isna(de) or pd.isna(cr):
+        if price_sub.empty:
             continue
 
-        s_roe = np.clip(roe * 3.5, 0, 100)
-        s_roa = np.clip(roa * 7.0, 0, 100)
-        s_liq = np.clip(cr * 45.0, 0, 100)
-        s_debt = np.clip((de_threshold - de) * 40.0, 0, 100)
+        current_price = round(clean_float(price_sub.iloc[-1]['close'], default=10.0), 2)
+        latest_date = str(price_sub.iloc[-1]['date'])[:10]
+        if len(price_sub) >= 2:
+            prev_close = clean_float(price_sub.iloc[-2]['close'], default=current_price)
+            change_val = round(current_price - prev_close, 2)
+            change_pct = round((change_val / prev_close) * 100, 2) if prev_close else 0.0
+        else:
+            change_val, change_pct = 0.0, 0.0
 
-        score_raw = (s_roe * 0.30) + (s_roa * 0.25) + (s_liq * 0.20) + (s_debt * 0.25)
-        
-        # Issue 05: ปลดล็อก np.clip(score, 25, 98) ออก ปล่อยคะแนนดิบ 0-100 ลงกราฟ
-        score_final = round(float(np.clip(score_raw, 0, 100)), 1)
-        rows.append({'year': int(r['year']), 'health_score': score_final})
-        
-    return pd.DataFrame(rows)
+        # ===== เรียกฟังก์ชันคำนวณของทั้ง 5 โมดูล (สูตรจริงอยู่ใน calculate_modules/) =====
+        # [ISSUE 03 - Dynamic D/E Threshold] ส่ง sector เข้า Module 1 เพื่อเลือกเพดาน D/E ตามกลุ่มอุตสาหกรรม
+        # แทนเพดาน fix 2.5 เท่าเดิม (ดู DE_SECTOR_THRESHOLDS ใน calculate_modules/company_health.py)
+        sector = SECTOR_MAP.get(ticker, 'Technology')
+        m1 = company_health.calculate_health_module(fin_sub, sector=sector)
+        m2 = fair_value.calculate_valuation_module(fin_sub, current_price, ticker)
+        m3 = entry_timing.calculate_timing_module(price_sub)
+        m4, feat_imp, backtest_df = ai_prediction.train_and_predict_ai(price_sub, ticker)
+        m5 = risk_analysis.calculate_risk_module(price_sub, risk_sub)
+
+        # เมตริกจริงเพิ่มเติมสำหรับ Overview / Key Highlights (คำนวณตรงนี้เพราะใช้งบ 2 ปีเทียบกัน ไม่ผูกกับโมดูลไหนเป็นพิเศษ)
+        fin_sorted = fin_sub.sort_values('year')
+        rev_growth, ni_growth = None, None
+        if len(fin_sorted) >= 2:
+            rev_prev, rev_curr = fin_sorted.iloc[-2]['total_revenue'], fin_sorted.iloc[-1]['total_revenue']
+            ni_prev, ni_curr = fin_sorted.iloc[-2]['net_income'], fin_sorted.iloc[-1]['net_income']
+            if rev_prev and clean_float(rev_prev) != 0:
+                rev_growth = round((clean_float(rev_curr) - clean_float(rev_prev)) / clean_float(rev_prev) * 100, 1)
+            if ni_prev and clean_float(ni_prev) != 0:
+                ni_growth = round((clean_float(ni_curr) - clean_float(ni_prev)) / clean_float(ni_prev) * 100, 1)
+        latest_row = fin_sorted.iloc[-1] if not fin_sorted.empty else None
+        fcf_latest = round(clean_float(latest_row.get('free_cash_flow')), 1) if latest_row is not None else None
+
+        all_summary.append({
+            'ticker': ticker,
+            'current_price': current_price,
+            'change_val': change_val,
+            'change_pct': change_pct,
+            'latest_date': latest_date,
+            'sector': sector,   # ใช้ตัวแปรเดียวกับที่ส่งเข้า Module 1 ด้านบน กันเขียนค่าเดาซ้ำสองที่
+            'revenue_growth_yoy': rev_growth,
+            'net_income_growth_yoy': ni_growth,
+            'free_cash_flow_latest': fcf_latest,
+            **m1, **m2, **m3, **m4, **m5
+        })
+
+        for f, imp in feat_imp.items():
+            all_feature_importance.append({'ticker': ticker, 'feature': f, 'importance': imp})
+
+        if not backtest_df.empty:
+            bt = backtest_df.copy()
+            bt['ticker'] = ticker
+            all_backtest.append(bt)
+
+        rh = risk_analysis.build_risk_rolling_history(price_sub)
+        rh['ticker'] = ticker
+        all_risk_history.append(rh)
+
+        # [ISSUE 03] เพดาน D/E เดียวกับที่ใช้คำนวณ m1 ด้านบน (sector ไม่เปลี่ยนปีต่อปี ให้กราฟ Trend เทียบกันได้)
+        hy = company_health.build_health_score_yearly(fin_sub, sector=sector)
+        hy['ticker'] = ticker
+        all_health_yearly.append(hy)
+
+        fv = fair_value.build_fair_value_yearly(fin_sub, price_sub, ticker)
+        fv['ticker'] = ticker
+        all_fair_value_yearly.append(fv)
+
+    df_res = pd.DataFrame(all_summary)
+
+    # ===== โมดูลสุดท้าย: Industry Benchmark ต้องรอผลจากทุกหุ้น/ทุกโมดูลก่อน ถึงจะจัดอันดับได้ =====
+    df_res = industry_benchmark.compute_industry_rankings(df_res)
+    df_res['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ===== บันทึกผลลัพธ์ทั้งหมดลงฐานข้อมูล =====
+    df_res.to_sql('cis_summary_scores', con=engine, if_exists='replace', index=False)
+
+    df_feat = pd.DataFrame(all_feature_importance)
+    df_feat.to_sql('ai_feature_importance', con=engine, if_exists='replace', index=False)
+
+    if all_backtest:
+        df_bt = pd.concat(all_backtest, ignore_index=True)
+        df_bt['date'] = df_bt['date'].astype(str)
+        df_bt.to_sql('ai_backtest_history', con=engine, if_exists='replace', index=False)
+
+    if all_risk_history:
+        df_rh = pd.concat(all_risk_history, ignore_index=True)
+        df_rh['date'] = df_rh['date'].astype(str)
+        df_rh.to_sql('risk_rolling_history', con=engine, if_exists='replace', index=False)
+
+    if all_health_yearly:
+        df_hy = pd.concat(all_health_yearly, ignore_index=True)
+        df_hy.to_sql('health_score_yearly', con=engine, if_exists='replace', index=False)
+
+    if all_fair_value_yearly:
+        df_fv = pd.concat(all_fair_value_yearly, ignore_index=True)
+        df_fv.to_sql('fair_value_yearly', con=engine, if_exists='replace', index=False)
+
+    print("\n✅ ประมวลผลและบันทึกคะแนนจริงของหุ้นทั้ง 8 ตัวลง cis_database.db เรียบร้อยแล้ว:")
+    print("=" * 85)
+    print(df_res[['ticker', 'current_price', 'fair_value', 'margin_of_safety', 'overall_score',
+                   'recommendation', 'health_score', 'ai_score', 'beta']])
+    print("=" * 85)
+
+
+if __name__ == '__main__':
+    run_full_pipeline()
