@@ -94,7 +94,7 @@ def render(ctx):
             marker=dict(size=10, color='#10B981', line=dict(width=1.5, color='#FFFFFF'))
         ))
         
-        # แก้ไขตรงนี้: เพิ่ม type='category' เข้าไปใน xaxis
+        # แก้ไขตรงนี้: เพิ่ม type='category' เข้าไปใน xaxis เพื่อป้องกันกราฟใส่จุดทศนิยมบนแกนปี
         fig_health_trend.update_layout(
             height=168, margin=dict(l=25, r=15, t=10, b=20), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
             yaxis=dict(range=[0, 110], tickvals=[0, 25, 50, 75, 100], tickfont=dict(size=11.5, color="#64748B"), gridcolor="#1E293B", zeroline=False),
