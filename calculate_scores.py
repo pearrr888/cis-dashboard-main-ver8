@@ -17,14 +17,6 @@ calculate_scores.py — Orchestrator (Data Pipeline / Integration Lead ดูแ
 ⚠️ ไฟล์นี้เป็น "ของกลาง" เหมือน common.py ของฝั่ง UI — โดยปกติ เจ้าของแต่ละโมดูลไม่ต้องแก้ไฟล์นี้เลย
 แก้แค่ calculate_modules/<โมดูลของตัวเอง>.py พอ ถ้าจำเป็นต้องแก้ไฟล์นี้ (เช่น เพิ่มตารางผลลัพธ์ใหม่)
 ให้แจ้ง Data Pipeline / Integration Lead ก่อน
-
-ตารางผลลัพธ์ที่สร้าง:
-- cis_summary_scores      : สรุปคะแนนรายหุ้น (ใช้ในทุกหน้าของ Dashboard)
-- ai_feature_importance   : Feature importance ของโมเดล Random Forest รายหุ้น (ใช้ในหน้า AI Prediction)
-- ai_backtest_history     : ผลทำนายจริงบนชุด Test ปี 2025 (ใช้ในหน้า AI Prediction)
-- risk_rolling_history    : Rolling volatility / drawdown รายสัปดาห์ (ใช้วาดกราฟหน้า Risk Analysis)
-- health_score_yearly     : คะแนนสุขภาพการเงินรายปี 2023-2025 (ใช้วาดกราฟ trend หน้า Company Health)
-- fair_value_yearly       : Fair Value ย้อนหลังรายปี เทียบราคาจริง (ใช้วาดกราฟหน้า Fair Value)
 """
 
 import pandas as pd
@@ -78,14 +70,21 @@ def run_full_pipeline():
         else:
             change_val, change_pct = 0.0, 0.0
 
-        # ===== เรียกฟังก์ชันคำนวณของทั้ง 5 โมดูล (สูตรจริงอยู่ใน calculate_modules/) =====
-        m1 = company_health.calculate_health_module(fin_sub)
-        m2 = fair_value.calculate_valuation_module(fin_sub, current_price, ticker)
-        m3 = entry_timing.calculate_timing_module(price_sub)
-        m4, feat_imp, backtest_df = ai_prediction.train_and_predict_ai(price_sub, ticker)
-        m5 = risk_analysis.calculate_risk_module(price_sub, risk_sub)
+        sector = SECTOR_MAP.get(ticker, 'Technology')
+        
+        # [ป้องกัน TypeError] ดักจับกรณีโมดูลพังและส่ง None กลับมา ให้แปลงเป็น Dictionary เปล่าแทน
+        m1 = company_health.calculate_health_module(fin_sub, sector=sector) or {}
+        m2 = fair_value.calculate_valuation_module(fin_sub, current_price, ticker) or {}
+        m3 = entry_timing.calculate_timing_module(price_sub) or {}
+        
+        try:
+            m4, feat_imp, backtest_df = ai_prediction.train_and_predict_ai(price_sub, ticker)
+        except Exception:
+            m4, feat_imp, backtest_df = {}, {}, pd.DataFrame()
+            
+        m4 = m4 or {}
+        m5 = risk_analysis.calculate_risk_module(price_sub, risk_sub) or {}
 
-        # เมตริกจริงเพิ่มเติมสำหรับ Overview / Key Highlights (คำนวณตรงนี้เพราะใช้งบ 2 ปีเทียบกัน ไม่ผูกกับโมดูลไหนเป็นพิเศษ)
         fin_sorted = fin_sub.sort_values('year')
         rev_growth, ni_growth = None, None
         if len(fin_sorted) >= 2:
@@ -95,6 +94,7 @@ def run_full_pipeline():
                 rev_growth = round((clean_float(rev_curr) - clean_float(rev_prev)) / clean_float(rev_prev) * 100, 1)
             if ni_prev and clean_float(ni_prev) != 0:
                 ni_growth = round((clean_float(ni_curr) - clean_float(ni_prev)) / clean_float(ni_prev) * 100, 1)
+        
         latest_row = fin_sorted.iloc[-1] if not fin_sorted.empty else None
         fcf_latest = round(clean_float(latest_row.get('free_cash_flow')), 1) if latest_row is not None else None
 
@@ -104,36 +104,40 @@ def run_full_pipeline():
             'change_val': change_val,
             'change_pct': change_pct,
             'latest_date': latest_date,
-            'sector': SECTOR_MAP.get(ticker, 'Technology'),
+            'sector': sector,
             'revenue_growth_yoy': rev_growth,
             'net_income_growth_yoy': ni_growth,
             'free_cash_flow_latest': fcf_latest,
             **m1, **m2, **m3, **m4, **m5
         })
 
-        for f, imp in feat_imp.items():
-            all_feature_importance.append({'ticker': ticker, 'feature': f, 'importance': imp})
+        if isinstance(feat_imp, dict):
+            for f, imp in feat_imp.items():
+                all_feature_importance.append({'ticker': ticker, 'feature': f, 'importance': imp})
 
-        if not backtest_df.empty:
+        if isinstance(backtest_df, pd.DataFrame) and not backtest_df.empty:
             bt = backtest_df.copy()
             bt['ticker'] = ticker
             all_backtest.append(bt)
 
         rh = risk_analysis.build_risk_rolling_history(price_sub)
-        rh['ticker'] = ticker
-        all_risk_history.append(rh)
+        if isinstance(rh, pd.DataFrame) and not rh.empty:
+            rh['ticker'] = ticker
+            all_risk_history.append(rh)
 
-        hy = company_health.build_health_score_yearly(fin_sub)
-        hy['ticker'] = ticker
-        all_health_yearly.append(hy)
+        hy = company_health.build_health_score_yearly(fin_sub, sector=sector)
+        if isinstance(hy, pd.DataFrame) and not hy.empty:
+            hy['ticker'] = ticker
+            all_health_yearly.append(hy)
 
         fv = fair_value.build_fair_value_yearly(fin_sub, price_sub, ticker)
-        fv['ticker'] = ticker
-        all_fair_value_yearly.append(fv)
+        if isinstance(fv, pd.DataFrame) and not fv.empty:
+            fv['ticker'] = ticker
+            all_fair_value_yearly.append(fv)
 
     df_res = pd.DataFrame(all_summary)
 
-    # ===== โมดูลสุดท้าย: Industry Benchmark ต้องรอผลจากทุกหุ้น/ทุกโมดูลก่อน ถึงจะจัดอันดับได้ =====
+    # ===== โมดูลสุดท้าย: Industry Benchmark =====
     df_res = industry_benchmark.compute_industry_rankings(df_res)
     df_res['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -141,7 +145,8 @@ def run_full_pipeline():
     df_res.to_sql('cis_summary_scores', con=engine, if_exists='replace', index=False)
 
     df_feat = pd.DataFrame(all_feature_importance)
-    df_feat.to_sql('ai_feature_importance', con=engine, if_exists='replace', index=False)
+    if not df_feat.empty:
+        df_feat.to_sql('ai_feature_importance', con=engine, if_exists='replace', index=False)
 
     if all_backtest:
         df_bt = pd.concat(all_backtest, ignore_index=True)
@@ -163,8 +168,12 @@ def run_full_pipeline():
 
     print("\n✅ ประมวลผลและบันทึกคะแนนจริงของหุ้นทั้ง 8 ตัวลง cis_database.db เรียบร้อยแล้ว:")
     print("=" * 85)
-    print(df_res[['ticker', 'current_price', 'fair_value', 'margin_of_safety', 'overall_score',
-                   'recommendation', 'health_score', 'ai_score', 'beta']])
+    
+    # [ป้องกัน KeyError] เลือก Print เฉพาะคอลัมน์ที่มีอยู่จริงใน DataFrame เท่านั้น
+    expected_cols = ['ticker', 'current_price', 'fair_value', 'margin_of_safety', 'overall_score',
+                     'recommendation', 'health_score', 'ai_score', 'beta']
+    exist_cols = [c for c in expected_cols if c in df_res.columns]
+    print(df_res[exist_cols])
     print("=" * 85)
 
 
