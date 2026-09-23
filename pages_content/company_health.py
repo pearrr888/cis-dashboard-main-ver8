@@ -93,11 +93,14 @@ def render(ctx):
             textfont=dict(size=12.5, color='#F8FAFC'), line=dict(color='#10B981', width=2),
             marker=dict(size=10, color='#10B981', line=dict(width=1.5, color='#FFFFFF'))
         ))
+        
+        # แก้ไขตรงนี้: เพิ่ม type='category' เข้าไปใน xaxis
         fig_health_trend.update_layout(
             height=168, margin=dict(l=25, r=15, t=10, b=20), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
             yaxis=dict(range=[0, 110], tickvals=[0, 25, 50, 75, 100], tickfont=dict(size=11.5, color="#64748B"), gridcolor="#1E293B", zeroline=False),
-            xaxis=dict(tickfont=dict(size=12, color="#94A3B8"), gridcolor="#1E293B"), showlegend=False
+            xaxis=dict(type='category', tickfont=dict(size=12, color="#94A3B8"), gridcolor="#1E293B"), showlegend=False
         )
+        
         show_chart(fig_health_trend, key="health_trend", expand_height=650)
 
     st.markdown("<div style='margin-top:22px;'></div>", unsafe_allow_html=True)
@@ -192,13 +195,7 @@ def render(ctx):
             return int(np.clip(ratio * 50, 5, 100))
 
         if peer_options:
-            # กรณีมีบริษัทคู่แข่งใน sector ให้เลือก
-            competitor = st.selectbox(
-                "เทียบกับคู่แข่ง", peer_options,
-                key="health_competitor_select",
-                format_func=lambda t: f"{t} — {COMPANY_NAMES.get(t, t)}"
-            )
-
+            competitor = st.selectbox("เทียบกับคู่แข่ง", peer_options, key="health_competitor_select", format_func=lambda t: f"{t} — {COMPANY_NAMES.get(t, t)}")
             comp_fin_all = ctx.fin_df[ctx.fin_df['ticker'] == competitor].sort_values('year')
             comp_fin_row = comp_fin_all[comp_fin_all['year'] == latest_year]
             if comp_fin_row.empty and not comp_fin_all.empty:
@@ -220,10 +217,8 @@ def render(ctx):
                 sub_label += f" (ปี {comp_year_used})"
 
         else:
-            # กรณีไม่มีคู่แข่งในกลุ่ม (เช่น JMART) -> เปรียบเทียบกับค่าเฉลี่ยตลาด/อุตสาหกรรมทั้งหมด
             target_label = "Industry Avg"
             sub_label = f"ไม่มีคู่แข่งตรงในกลุ่ม &bull; เทียบค่าเฉลี่ยตลาดรวม (ปี {latest_year})"
-
             market_latest = ctx.fin_df[ctx.fin_df['year'] == latest_year] if not ctx.fin_df.empty else pd.DataFrame()
             if market_latest.empty and not ctx.fin_df.empty:
                 market_latest = ctx.fin_df
